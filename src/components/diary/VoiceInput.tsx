@@ -7,11 +7,6 @@ interface VoiceInputProps {
   onTranscript: (transcript: string) => void;
 }
 
-interface SpeechRecognitionResult {
-  transcript: string;
-  isFinal: boolean;
-}
-
 interface SpeechRecognitionAlternative {
   transcript: string;
 }
