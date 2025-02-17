@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { auth } from '@/lib/firebase';
-import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { GoogleAuthProvider, signInWithPopup, AuthError } from 'firebase/auth';
 import { useRouter } from 'next/navigation';
 
 export function GoogleSignInButton() {
@@ -19,9 +19,10 @@ export function GoogleSignInButton() {
       const result = await signInWithPopup(auth, provider);
       console.log('Successfully signed in:', result.user.email);
       router.push('/diary');
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error signing in with Google:', error);
-      setError(error.message || 'Failed to sign in with Google');
+      const authError = error as AuthError;
+      setError(authError.message || 'Failed to sign in with Google');
     }
   };
 
