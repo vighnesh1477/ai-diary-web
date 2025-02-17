@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react';
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
@@ -18,7 +20,7 @@ export function DiaryEntry() {
     setContent((prev) => prev.replace(original, suggestion));
   };
 
-  const saveEntry = async () => {
+  const saveEntry = useCallback(async () => {
     if (!user || !content.trim()) return;
 
     setSaving(true);
@@ -35,7 +37,7 @@ export function DiaryEntry() {
     } finally {
       setSaving(false);
     }
-  };
+  }, [user, content]);
 
   // Auto-save every 30 seconds if there's content
   useEffect(() => {
