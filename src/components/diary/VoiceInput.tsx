@@ -1,13 +1,39 @@
-import { useState, useCallback } from 'react';
+'use client';
+
+import { useState, useCallback, useEffect } from 'react';
 import { Mic, MicOff } from 'lucide-react';
 
 interface VoiceInputProps {
-  onTranscript: (text: string) => void;
+  onTranscript: (transcript: string) => void;
+}
+
+// Define the SpeechRecognition type
+interface Window {
+  webkitSpeechRecognition: any;
+  SpeechRecognition: any;
+}
+
+declare global {
+  interface Window {
+    webkitSpeechRecognition: typeof SpeechRecognition;
+    SpeechRecognition: new () => SpeechRecognition;
+  }
+}
+
+interface SpeechRecognitionEvent {
+  results: {
+    item(index: number): {
+      item(index: number): {
+        transcript: string;
+      };
+    };
+    length: number;
+  };
 }
 
 export function VoiceInput({ onTranscript }: VoiceInputProps) {
   const [isListening, setIsListening] = useState(false);
-  const [recognition, setRecognition] = useState<SpeechRecognition | null>(null);
+  const [recognition, setRecognition] = useState<typeof window.SpeechRecognition | null>(null);
 
   const startListening = useCallback(() => {
     if (!('webkitSpeechRecognition' in window)) {
@@ -15,11 +41,12 @@ export function VoiceInput({ onTranscript }: VoiceInputProps) {
       return;
     }
 
-    const recognition = new webkitSpeechRecognition();
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
 
-    recognition.onresult = (event) => {
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
       const transcript = Array.from(event.results)
         .map(result => result[0].transcript)
         .join('');
@@ -36,28 +63,39 @@ export function VoiceInput({ onTranscript }: VoiceInputProps) {
     };
 
     recognition.start();
-    setRecognition(recognition);
     setIsListening(true);
+    setRecognition(recognition);
   }, [onTranscript]);
 
   const stopListening = useCallback(() => {
     if (recognition) {
       recognition.stop();
-      setRecognition(null);
       setIsListening(false);
     }
+  }, [recognition]);
+
+  useEffect(() => {
+    return () => {
+      if (recognition) {
+        recognition.stop();
+      }
+    };
   }, [recognition]);
 
   return (
     <button
       onClick={isListening ? stopListening : startListening}
-      className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors duration-200"
-      title={isListening ? 'Stop recording' : 'Start recording'}
+      className={`p-2 rounded-full transition-colors duration-200 ${
+        isListening
+          ? 'bg-red-500 hover:bg-red-600 text-white'
+          : 'bg-blue-500 hover:bg-blue-600 text-white'
+      }`}
+      title={isListening ? 'Stop Recording' : 'Start Recording'}
     >
       {isListening ? (
-        <MicOff className="w-6 h-6 text-red-500" />
+        <MicOff className="w-5 h-5" />
       ) : (
-        <Mic className="w-6 h-6 text-gray-600 dark:text-gray-400" />
+        <Mic className="w-5 h-5" />
       )}
     </button>
   );
