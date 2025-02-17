@@ -5,8 +5,8 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { db } from '@/lib/firebase';
 import { collection, query, orderBy, getDocs } from 'firebase/firestore';
 import { Search } from 'lucide-react';
-import SentimentAnalysis from './SentimentAnalysis';
-import ExportImport from './ExportImport';
+import { SentimentAnalysis } from './SentimentAnalysis';
+import { ExportImport } from './ExportImport';
 
 interface DiaryEntry {
   id: string;

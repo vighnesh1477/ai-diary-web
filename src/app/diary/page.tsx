@@ -7,7 +7,7 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
-function DiaryPage() {
+export default function DiaryPage() {
   const { user } = useAuth();
   const router = useRouter();
   const [selectedIndex, setSelectedIndex] = useState(0);

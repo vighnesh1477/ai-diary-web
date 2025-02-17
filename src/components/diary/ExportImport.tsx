@@ -3,14 +3,13 @@
 import { useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, addDoc, serverTimestamp, DocumentData } from 'firebase/firestore';
 import { Download, Upload, FileText } from 'lucide-react';
 
-interface DiaryEntry {
-  id: string;
+interface DiaryEntryData {
   content: string;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export function ExportImport() {
@@ -31,8 +30,8 @@ export function ExportImport() {
 
       // Create PDF content
       let pdfContent = `AI Diary - Export Date: ${new Date().toLocaleDateString()}\n\n`;
-      entries.sort((a: any, b: any) => b.createdAt - a.createdAt)
-        .forEach((entry: any) => {
+      entries.sort((a: DocumentData, b: DocumentData) => b.createdAt - a.createdAt)
+        .forEach((entry: DocumentData) => {
           pdfContent += `Date: ${entry.createdAt.toLocaleDateString()}\n`;
           pdfContent += `${entry.content}\n\n`;
           pdfContent += "-------------------\n\n";
@@ -91,7 +90,7 @@ export function ExportImport() {
     setLoading(true);
     try {
       const text = await file.text();
-      const entries = JSON.parse(text);
+      const entries = JSON.parse(text) as DiaryEntryData[];
       
       const entriesRef = collection(db, `users/${user.uid}/entries`);
       for (const entry of entries) {
