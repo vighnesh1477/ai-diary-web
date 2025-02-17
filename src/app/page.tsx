@@ -1,4 +1,3 @@
-import Image from "next/image";
 import { GoogleSignInButton } from "@/components/auth/GoogleSignInButton";
 
 export default function Home() {

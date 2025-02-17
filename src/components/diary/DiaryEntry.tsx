@@ -43,7 +43,7 @@ export function DiaryEntry() {
 
     const timer = setTimeout(saveEntry, 30000);
     return () => clearTimeout(timer);
-  }, [content]);
+  }, [content, saveEntry]);
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
