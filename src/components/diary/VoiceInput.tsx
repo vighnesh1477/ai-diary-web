@@ -7,33 +7,53 @@ interface VoiceInputProps {
   onTranscript: (transcript: string) => void;
 }
 
-// Define the SpeechRecognition type
-interface Window {
-  webkitSpeechRecognition: any;
-  SpeechRecognition: any;
+interface SpeechRecognitionResult {
+  transcript: string;
+  isFinal: boolean;
 }
 
-declare global {
-  interface Window {
-    webkitSpeechRecognition: typeof SpeechRecognition;
-    SpeechRecognition: new () => SpeechRecognition;
-  }
+interface SpeechRecognitionAlternative {
+  transcript: string;
 }
 
-interface SpeechRecognitionEvent {
+interface SpeechRecognitionEvent extends Event {
   results: {
-    item(index: number): {
-      item(index: number): {
-        transcript: string;
-      };
+    [index: number]: {
+      [index: number]: SpeechRecognitionAlternative;
+      isFinal: boolean;
+      length: number;
     };
     length: number;
   };
 }
 
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onend: ((this: SpeechRecognition, ev: Event) => void) | null;
+  onerror: ((this: SpeechRecognition, ev: Event) => void) | null;
+  onresult: ((this: SpeechRecognition, ev: SpeechRecognitionEvent) => void) | null;
+  onstart: ((this: SpeechRecognition, ev: Event) => void) | null;
+  start(): void;
+  stop(): void;
+  abort(): void;
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition: {
+      new (): SpeechRecognition;
+    };
+    webkitSpeechRecognition: {
+      new (): SpeechRecognition;
+    };
+  }
+}
+
 export function VoiceInput({ onTranscript }: VoiceInputProps) {
   const [isListening, setIsListening] = useState(false);
-  const [recognition, setRecognition] = useState<typeof window.SpeechRecognition | null>(null);
+  const [recognition, setRecognition] = useState<SpeechRecognition | null>(null);
 
   const startListening = useCallback(() => {
     if (!('webkitSpeechRecognition' in window)) {
@@ -41,21 +61,17 @@ export function VoiceInput({ onTranscript }: VoiceInputProps) {
       return;
     }
 
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
+    const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognitionAPI();
     recognition.continuous = true;
     recognition.interimResults = true;
+    recognition.lang = 'en-US';
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
       const transcript = Array.from(event.results)
         .map(result => result[0].transcript)
         .join('');
       onTranscript(transcript);
-    };
-
-    recognition.onerror = (event) => {
-      console.error('Speech recognition error:', event.error);
-      setIsListening(false);
     };
 
     recognition.onend = () => {
