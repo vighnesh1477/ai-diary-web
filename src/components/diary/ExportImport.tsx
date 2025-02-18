@@ -1,156 +1,255 @@
 'use client';
 
 import { useState } from 'react';
-import { useAuth } from '@/components/auth/AuthProvider';
-import { db } from '@/lib/firebase';
-import { collection, getDocs, addDoc, serverTimestamp, DocumentData } from 'firebase/firestore';
-import { Download, Upload, FileText } from 'lucide-react';
+import { auth, db } from '@/lib/firebase';
+import { collection, query, getDocs, orderBy } from 'firebase/firestore';
+import { Download, FileJson, FileText, FilePdf, Calendar } from 'lucide-react';
+import { format } from 'date-fns';
+import { AnimatedButton } from '../ui/animated-button';
+import { motion } from 'framer-motion';
+import { EncryptionService } from '@/lib/encryption';
+import { jsPDF } from 'jspdf';
 
-interface DiaryEntryData {
+interface DiaryEntry {
   content: string;
-  createdAt: string;
-  updatedAt: string;
+  createdAt: Date;
+  sentiment?: number;
 }
 
 export function ExportImport() {
   const [loading, setLoading] = useState(false);
-  const { user } = useAuth();
+  const [dateRange, setDateRange] = useState<{
+    start: string;
+    end: string;
+  }>({
+    start: '',
+    end: '',
+  });
 
-  const exportToPDF = async () => {
-    setLoading(true);
+  const fetchEntries = async () => {
+    if (!auth.currentUser) return [];
+
+    const entriesRef = collection(db, `users/${auth.currentUser.uid}/entries`);
+    const q = query(entriesRef, orderBy('createdAt', 'desc'));
+    const querySnapshot = await getDocs(q);
+
+    const encryptionService = EncryptionService.getInstance();
+    encryptionService.setEncryptionKey(auth.currentUser.uid);
+
+    return querySnapshot.docs
+      .map(doc => {
+        const data = doc.data();
+        return {
+          content: data.isEncrypted 
+            ? encryptionService.decrypt(data.content)
+            : data.content,
+          createdAt: data.createdAt.toDate(),
+          sentiment: data.sentiment,
+        };
+      })
+      .filter(entry => {
+        if (!dateRange.start && !dateRange.end) return true;
+        const entryDate = entry.createdAt;
+        const start = dateRange.start ? new Date(dateRange.start) : null;
+        const end = dateRange.end ? new Date(dateRange.end) : null;
+        
+        if (start && end) {
+          return entryDate >= start && entryDate <= end;
+        } else if (start) {
+          return entryDate >= start;
+        } else if (end) {
+          return entryDate <= end;
+        }
+        return true;
+      });
+  };
+
+  const exportEntries = async (format: 'json' | 'txt' | 'pdf') => {
     try {
-      const entriesRef = collection(db, `users/${user?.uid}/entries`);
-      const snapshot = await getDocs(entriesRef);
-      const entries = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate(),
-        updatedAt: doc.data().updatedAt?.toDate()
-      }));
+      setLoading(true);
+      const entries = await fetchEntries();
 
-      // Create PDF content
-      let pdfContent = `AI Diary - Export Date: ${new Date().toLocaleDateString()}\n\n`;
-      entries.sort((a: DocumentData, b: DocumentData) => b.createdAt - a.createdAt)
-        .forEach((entry: DocumentData) => {
-          pdfContent += `Date: ${entry.createdAt.toLocaleDateString()}\n`;
-          pdfContent += `${entry.content}\n\n`;
-          pdfContent += "-------------------\n\n";
-        });
-
-      // Create and download file
-      const blob = new Blob([pdfContent], { type: 'text/plain' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `ai-diary-export-${new Date().toISOString().split('T')[0]}.txt`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      switch (format) {
+        case 'json':
+          exportJSON(entries);
+          break;
+        case 'txt':
+          exportTXT(entries);
+          break;
+        case 'pdf':
+          exportPDF(entries);
+          break;
+      }
     } catch (error) {
-      console.error('Error exporting diary:', error);
+      console.error('Error exporting entries:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const exportToJSON = async () => {
-    setLoading(true);
-    try {
-      const entriesRef = collection(db, `users/${user?.uid}/entries`);
-      const snapshot = await getDocs(entriesRef);
-      const entries = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate().toISOString(),
-        updatedAt: doc.data().updatedAt?.toDate().toISOString()
-      }));
-
-      const jsonContent = JSON.stringify(entries, null, 2);
-      const blob = new Blob([jsonContent], { type: 'application/json' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `ai-diary-export-${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (error) {
-      console.error('Error exporting diary:', error);
-    } finally {
-      setLoading(false);
-    }
+  const exportJSON = (entries: DiaryEntry[]) => {
+    const data = JSON.stringify(entries, null, 2);
+    downloadFile(data, 'diary-entries.json', 'application/json');
   };
 
-  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file || !user) return;
+  const exportTXT = (entries: DiaryEntry[]) => {
+    const data = entries
+      .map(entry => {
+        const date = format(entry.createdAt, 'MMMM d, yyyy h:mm a');
+        const mood = entry.sentiment
+          ? entry.sentiment > 0
+            ? 'Positive'
+            : entry.sentiment < 0
+            ? 'Negative'
+            : 'Neutral'
+          : 'No mood data';
 
-    setLoading(true);
-    try {
-      const text = await file.text();
-      const entries = JSON.parse(text) as DiaryEntryData[];
-      
-      const entriesRef = collection(db, `users/${user.uid}/entries`);
-      for (const entry of entries) {
-        await addDoc(entriesRef, {
-          content: entry.content,
-          createdAt: new Date(entry.createdAt),
-          updatedAt: serverTimestamp(),
-        });
+        return `Date: ${date}\nMood: ${mood}\n\n${entry.content}\n\n${'='.repeat(50)}\n\n`;
+      })
+      .join('');
+
+    downloadFile(data, 'diary-entries.txt', 'text/plain');
+  };
+
+  const exportPDF = (entries: DiaryEntry[]) => {
+    const doc = new jsPDF();
+    let y = 20;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(20);
+    doc.text('My Diary Entries', 20, y);
+    y += 15;
+
+    entries.forEach((entry) => {
+      // Add new page if needed
+      if (y > 270) {
+        doc.addPage();
+        y = 20;
       }
 
-      alert('Import successful!');
-    } catch (error) {
-      console.error('Error importing diary:', error);
-      alert('Error importing diary. Please make sure the file is a valid JSON export.');
-    } finally {
-      setLoading(false);
-    }
+      const date = format(entry.createdAt, 'MMMM d, yyyy h:mm a');
+      const mood = entry.sentiment
+        ? entry.sentiment > 0
+          ? 'Positive'
+          : entry.sentiment < 0
+          ? 'Negative'
+          : 'Neutral'
+        : 'No mood data';
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(12);
+      doc.text(`Date: ${date}`, 20, y);
+      y += 7;
+      doc.text(`Mood: ${mood}`, 20, y);
+      y += 10;
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      
+      // Split long text into lines
+      const lines = doc.splitTextToSize(entry.content, 170);
+      lines.forEach(line => {
+        if (y > 270) {
+          doc.addPage();
+          y = 20;
+        }
+        doc.text(line, 20, y);
+        y += 7;
+      });
+
+      y += 10;
+    });
+
+    doc.save('diary-entries.pdf');
+  };
+
+  const downloadFile = (data: string, filename: string, type: string) => {
+    const blob = new Blob([data], { type });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
   };
 
   return (
-    <div className="flex flex-col space-y-4">
-      <div className="flex space-x-4">
-        <button
-          onClick={exportToPDF}
-          disabled={loading}
-          className="flex items-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition-colors duration-200"
-        >
-          <FileText className="w-5 h-5" />
-          <span>Export as Text</span>
-        </button>
-
-        <button
-          onClick={exportToJSON}
-          disabled={loading}
-          className="flex items-center space-x-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white rounded-lg transition-colors duration-200"
-        >
-          <Download className="w-5 h-5" />
-          <span>Export as JSON</span>
-        </button>
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.5 }}
+      className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 mt-6"
+    >
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-2xl font-semibold text-gray-900 dark:text-white">
+          Export Diary Entries
+        </h2>
+        <Calendar className="w-6 h-6 text-gray-400" />
       </div>
 
-      <div className="relative">
-        <input
-          type="file"
-          accept=".json"
-          onChange={handleImport}
-          className="hidden"
-          id="import-input"
-          disabled={loading}
-        />
-        <label
-          htmlFor="import-input"
-          className={`flex items-center space-x-2 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400 text-white rounded-lg transition-colors duration-200 cursor-pointer ${
-            loading ? 'opacity-50 cursor-not-allowed' : ''
-          }`}
-        >
-          <Upload className="w-5 h-5" />
-          <span>Import from JSON</span>
-        </label>
+      <div className="space-y-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Start Date (Optional)
+            </label>
+            <input
+              type="date"
+              value={dateRange.start}
+              onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+              className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              End Date (Optional)
+            </label>
+            <input
+              type="date"
+              value={dateRange.end}
+              onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+              className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md"
+            />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-4">
+          <AnimatedButton
+            onClick={() => exportEntries('json')}
+            disabled={loading}
+            variant="secondary"
+            icon={<FileJson className="w-5 h-5" />}
+          >
+            Export as JSON
+          </AnimatedButton>
+
+          <AnimatedButton
+            onClick={() => exportEntries('txt')}
+            disabled={loading}
+            variant="secondary"
+            icon={<FileText className="w-5 h-5" />}
+          >
+            Export as Text
+          </AnimatedButton>
+
+          <AnimatedButton
+            onClick={() => exportEntries('pdf')}
+            disabled={loading}
+            variant="secondary"
+            icon={<FilePdf className="w-5 h-5" />}
+          >
+            Export as PDF
+          </AnimatedButton>
+        </div>
+
+        {loading && (
+          <div className="text-center text-gray-500 dark:text-gray-400">
+            Preparing your diary entries...
+          </div>
+        )}
       </div>
-    </div>
+    </motion.div>
   );
 }

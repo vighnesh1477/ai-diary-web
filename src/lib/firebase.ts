@@ -1,6 +1,6 @@
 import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getAuth, GoogleAuthProvider } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -23,6 +23,30 @@ Object.entries(firebaseConfig).forEach(([key, value]) => {
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
+
+// Enable offline persistence
+if (typeof window !== 'undefined') {
+  enableIndexedDbPersistence(db).catch((err) => {
+    if (err.code === 'failed-precondition') {
+      console.warn('Multiple tabs open, persistence can only be enabled in one tab at a time.');
+    } else if (err.code === 'unimplemented') {
+      console.warn('The current browser does not support persistence.');
+    }
+  });
+}
+
+// Add connection state listener
+if (typeof window !== 'undefined') {
+  db.enableNetwork().catch(console.error);
+  
+  window.addEventListener('online', () => {
+    db.enableNetwork().catch(console.error);
+  });
+  
+  window.addEventListener('offline', () => {
+    db.disableNetwork().catch(console.error);
+  });
+}
 
 // Configure Google Auth Provider
 const googleProvider = new GoogleAuthProvider();

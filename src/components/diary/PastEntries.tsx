@@ -1,112 +1,183 @@
-'use client';
-
 import { useState, useEffect } from 'react';
-import { useAuth } from '@/components/auth/AuthProvider';
-import { db } from '@/lib/firebase';
-import { collection, query, orderBy, getDocs } from 'firebase/firestore';
-import { Search } from 'lucide-react';
-import { SentimentAnalysis } from './SentimentAnalysis';
-import { ExportImport } from './ExportImport';
+import { collection, query, where, orderBy, getDocs } from 'firebase/firestore';
+import { auth, db } from '@/lib/firebase';
+import { format, isSameDay } from 'date-fns';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Tag, Calendar as CalendarIcon } from 'lucide-react';
+import { Calendar } from '@/components/ui/calendar';
+import { DiaryEntrySkeleton } from '../ui/skeleton';
 
-interface DiaryEntry {
+interface Entry {
   id: string;
   content: string;
-  createdAt: Date;
+  timestamp: string;
+  isEncrypted: boolean;
+  summary?: string;
+  topics?: string[];
+  mood?: {
+    score: number;
+    primaryEmotion: string;
+  };
 }
 
 export function PastEntries() {
-  const [entries, setEntries] = useState<DiaryEntry[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
-  const { user } = useAuth();
+  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
+  const [datesWithEntries, setDatesWithEntries] = useState<Date[]>([]);
 
   useEffect(() => {
-    async function fetchEntries() {
-      if (!user) return;
-
+    const fetchEntries = async () => {
+      if (!auth.currentUser) return;
+      
       try {
-        const entriesRef = collection(db, `users/${user.uid}/entries`);
-        const q = query(entriesRef, orderBy('createdAt', 'desc'));
-        const snapshot = await getDocs(q);
+        const entriesRef = collection(db, `users/${auth.currentUser.uid}/entries`);
+        const q = query(
+          entriesRef,
+          orderBy('timestamp', 'desc')
+        );
         
-        const fetchedEntries = snapshot.docs.map(doc => ({
+        const querySnapshot = await getDocs(q);
+        const fetchedEntries = querySnapshot.docs.map(doc => ({
           id: doc.id,
-          content: doc.data().content,
-          createdAt: doc.data().createdAt?.toDate() || new Date(),
-        }));
+          ...doc.data()
+        })) as Entry[];
         
         setEntries(fetchedEntries);
+        
+        // Get unique dates with entries
+        const dates = [...new Set(
+          fetchedEntries.map(entry => format(new Date(entry.timestamp), 'yyyy-MM-dd'))
+        )].map(dateStr => new Date(dateStr));
+        setDatesWithEntries(dates);
       } catch (error) {
         console.error('Error fetching entries:', error);
       } finally {
         setLoading(false);
       }
-    }
+    };
 
     fetchEntries();
-  }, [user]);
-
-  const filteredEntries = entries.filter(entry =>
-    entry.content.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  }, []);
 
   if (loading) {
-    return (
-      <div className="flex justify-center p-8">
-        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
-      </div>
-    );
+    return <DiaryEntrySkeleton />;
   }
 
+  const getMoodColor = (score: number) => {
+    if (score > 0.3) return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
+    if (score < -0.3) return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200';
+    return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
+  };
+
+  const selectedEntries = entries.filter(entry => 
+    selectedDate && isSameDay(new Date(entry.timestamp), selectedDate)
+  );
+
   return (
-    <div className="mt-8">
-      <div className="relative mb-6">
-        <input
-          type="text"
-          placeholder="Search entries..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full px-4 py-2 pl-10 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-        />
-        <Search className="absolute left-3 top-2.5 w-5 h-5 text-gray-400" />
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold">Past Entries</h2>
+        <div className="flex items-center text-sm text-gray-500">
+          <CalendarIcon className="w-4 h-4 mr-2" />
+          {selectedDate ? format(selectedDate, 'MMMM d, yyyy') : 'Select a date'}
+        </div>
       </div>
 
-      <div className="space-y-4">
-        {filteredEntries.map((entry) => (
-          <div
-            key={entry.id}
-            className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 hover:shadow-lg transition-shadow duration-200"
-          >
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">
-              {entry.createdAt.toLocaleDateString('en-US', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-              })}
-            </p>
-            <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-              {entry.content}
-            </p>
-          </div>
-        ))}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+          <Calendar
+            mode="single"
+            selected={selectedDate}
+            onSelect={setSelectedDate}
+            className="rounded-md border dark:border-gray-700"
+            modifiers={{
+              hasEntry: (date) => 
+                datesWithEntries.some(entryDate => 
+                  isSameDay(entryDate, date)
+                )
+            }}
+            modifiersStyles={{
+              hasEntry: { 
+                backgroundColor: '#93c5fd',
+                color: '#1e3a8a',
+                fontWeight: 'bold'
+              }
+            }}
+          />
+        </div>
 
-        {filteredEntries.length === 0 && (
-          <div className="text-center text-gray-500 dark:text-gray-400 py-8">
-            {searchTerm ? 'No entries found matching your search' : 'No entries yet'}
-          </div>
-        )}
-      </div>
+        <div className="space-y-4">
+          <AnimatePresence mode="wait">
+            {selectedEntries.length > 0 ? (
+              <motion.div
+                key="entries"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="space-y-4"
+              >
+                {selectedEntries.map((entry) => (
+                  <motion.div
+                    key={entry.id}
+                    className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 space-y-4"
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="space-y-2">
+                        <h3 className="text-lg font-semibold">
+                          {format(new Date(entry.timestamp), 'h:mm a')}
+                        </h3>
+                        {entry.summary && (
+                          <p className="text-gray-600 dark:text-gray-400 italic">
+                            "{entry.summary}"
+                          </p>
+                        )}
+                      </div>
+                      {entry.mood && (
+                        <span className={`px-3 py-1 rounded-full text-sm font-medium ${getMoodColor(entry.mood.score)}`}>
+                          {entry.mood.primaryEmotion}
+                        </span>
+                      )}
+                    </div>
 
-      <div className="mt-8">
-        <SentimentAnalysis />
-      </div>
+                    <div className="prose dark:prose-invert max-w-none">
+                      <p>{entry.isEncrypted ? '🔒 Encrypted Entry' : entry.content}</p>
+                    </div>
 
-      <div className="mt-8">
-        <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-white">
-          Export & Import
-        </h2>
-        <ExportImport />
+                    {entry.topics && entry.topics.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-4">
+                        {entry.topics.map((topic, i) => (
+                          <span
+                            key={i}
+                            className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                          >
+                            <Tag className="w-3 h-3 mr-1" />
+                            {topic}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </motion.div>
+                ))}
+              </motion.div>
+            ) : (
+              <motion.div
+                key="no-entries"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="flex flex-col items-center justify-center h-full min-h-[200px] bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6"
+              >
+                <CalendarIcon className="w-12 h-12 text-gray-400 mb-4" />
+                <p className="text-gray-500 dark:text-gray-400 text-center">
+                  {selectedDate
+                    ? `No entries for ${format(selectedDate, 'MMMM d, yyyy')}`
+                    : 'Select a date to view entries'}
+                </p>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
     </div>
   );
